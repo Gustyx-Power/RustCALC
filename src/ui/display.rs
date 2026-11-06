@@ -39,19 +39,8 @@ pub fn render_display(
                 .layout(Layout::top_down(Align::Min)),
         );
 
-        // Header technical ticker line
+        // Header status indicators
         content_ui.horizontal(|ui| {
-            let ticker_color = if state.is_error {
-                Color32::from_rgb(220, 38, 38)
-            } else {
-                theme.text_muted()
-            };
-            ui.label(
-                egui::RichText::new("[RustCALC // SCI_ENGINE_V1]")
-                    .font(FontId::monospace(9.5))
-                    .color(ticker_color),
-            );
-
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if state.copied_feedback {
                     ui.label(
