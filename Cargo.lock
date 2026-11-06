@@ -1824,6 +1824,7 @@ dependencies = [
 name = "rustcalc"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "eframe",
  "egui",
  "mimalloc",

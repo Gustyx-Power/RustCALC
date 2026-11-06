@@ -17,7 +17,10 @@ pub struct CalculatorApp {
     pub history: Vec<HistoryItem>,
     pub drawer_tab: DrawerTab,
     pub is_drawer_open: bool,
-    pub copied_timer: f32,
+    pub feedback_timer: f32,
+    pub feedback_msg: Option<String>,
+    pub has_copied: bool,
+    pub last_copied: String,
     pub just_evaluated: bool,
 }
 
@@ -34,7 +37,10 @@ impl Default for CalculatorApp {
             history: Vec::new(),
             drawer_tab: DrawerTab::History,
             is_drawer_open: false,
-            copied_timer: 0.0,
+            feedback_timer: 0.0,
+            feedback_msg: None,
+            has_copied: false,
+            last_copied: String::new(),
             just_evaluated: false,
         }
     }
@@ -87,6 +93,7 @@ impl CalculatorApp {
                 self.is_error = false;
                 self.error_msg = None;
                 self.just_evaluated = false;
+                self.has_copied = false;
                 crate::trim_memory();
             }
             KeyAction::Evaluate => {
@@ -188,6 +195,7 @@ impl CalculatorApp {
                 self.is_error = false;
                 self.error_msg = None;
                 self.just_evaluated = true;
+                self.has_copied = false;
 
                 // Add to history
                 self.history.push(HistoryItem {
@@ -201,16 +209,97 @@ impl CalculatorApp {
             Err(e) => {
                 self.is_error = true;
                 self.error_msg = Some(e);
+                self.has_copied = false;
             }
         }
     }
 
+    pub fn copy_result(&mut self, ctx: &egui::Context) {
+        let text = if !self.result.is_empty() {
+            self.result.clone()
+        } else if !self.expression.is_empty() {
+            self.expression.clone()
+        } else {
+            "0".to_string()
+        };
+        ctx.copy_text(text.clone());
+        if let Ok(mut cb) = arboard::Clipboard::new() {
+            let _ = cb.set_text(&text);
+        }
+        self.last_copied = text;
+        self.has_copied = true;
+        self.feedback_msg = Some("COPIED TO CLIPBOARD".to_string());
+        self.feedback_timer = 1.5;
+    }
+
+    pub fn paste_clipboard(&mut self) {
+        let text_to_paste = arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut cb| cb.get_text().ok())
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                if !self.last_copied.trim().is_empty() {
+                    Some(self.last_copied.clone())
+                } else {
+                    None
+                }
+            });
+
+        if let Some(text) = text_to_paste {
+            self.paste_text(&text);
+            self.feedback_msg = Some("PASTED FROM CLIPBOARD".to_string());
+            self.feedback_timer = 1.5;
+        }
+        self.has_copied = false;
+    }
+
+    pub fn paste_text(&mut self, text: &str) {
+        let sanitized: String = text
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '*' | '/' | '^' | '%' | '!' | '(' | ')' | '.' | ' ' | 'π' | 'τ' | 'φ'))
+            .collect();
+        let trimmed = sanitized.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        if self.is_error || self.just_evaluated {
+            let starts_with_op = trimmed.starts_with('+')
+                || trimmed.starts_with('-')
+                || trimmed.starts_with('*')
+                || trimmed.starts_with('/')
+                || trimmed.starts_with('^')
+                || trimmed.starts_with('%');
+            if starts_with_op && !self.is_error {
+                self.expression = format_result(self.eval_ctx.ans);
+                if !trimmed.starts_with(' ') {
+                    self.expression.push(' ');
+                }
+            } else {
+                self.expression.clear();
+            }
+            self.is_error = false;
+            self.error_msg = None;
+        }
+        self.just_evaluated = false;
+        self.expression.push_str(trimmed);
+        self.live_preview();
+    }
+
     fn handle_keyboard_input(&mut self, ctx: &egui::Context) {
         let mut actions: Vec<KeyAction> = Vec::new();
+        let mut do_copy = false;
+        let mut to_paste: Option<String> = None;
 
         ctx.input(|i| {
             for event in &i.events {
                 match event {
+                    egui::Event::Copy => {
+                        do_copy = true;
+                    }
+                    egui::Event::Paste(pasted) => {
+                        to_paste = Some(pasted.clone());
+                    }
                     egui::Event::Text(text) => {
                         for c in text.chars() {
                             match c {
@@ -231,28 +320,34 @@ impl CalculatorApp {
                             }
                         }
                     }
-                    egui::Event::Paste(pasted) => {
-                        let sanitized: String = pasted
-                            .chars()
-                            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '*' | '/' | '^' | '%' | '!' | '(' | ')' | '.' | ' ' | 'π' | 'τ' | 'φ'))
-                            .collect();
-                        if !sanitized.is_empty() {
-                            actions.push(KeyAction::Insert(sanitized));
-                        }
-                    }
-                    egui::Event::Key { key, pressed: true, .. } => {
-                        match key {
-                            Key::Enter | Key::Equals => actions.push(KeyAction::Evaluate),
-                            Key::Backspace => actions.push(KeyAction::Backspace),
-                            Key::Escape => actions.push(KeyAction::Clear),
-                            Key::Delete => actions.push(KeyAction::Clear),
-                            _ => {}
+                    egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                        if (modifiers.ctrl || modifiers.command) && *key == Key::C {
+                            do_copy = true;
+                        } else {
+                            match key {
+                                Key::Enter | Key::Equals => actions.push(KeyAction::Evaluate),
+                                Key::Backspace => actions.push(KeyAction::Backspace),
+                                Key::Escape => actions.push(KeyAction::Clear),
+                                Key::Delete => actions.push(KeyAction::Clear),
+                                _ => {}
+                            }
                         }
                     }
                     _ => {}
                 }
             }
         });
+
+        if do_copy {
+            self.copy_result(ctx);
+        }
+
+        if let Some(pasted) = to_paste {
+            self.paste_text(&pasted);
+            self.feedback_msg = Some("PASTED FROM CLIPBOARD".to_string());
+            self.feedback_timer = 1.5;
+            self.has_copied = false;
+        }
 
         for act in actions {
             self.execute_action(act);
@@ -262,9 +357,12 @@ impl CalculatorApp {
 
 impl eframe::App for CalculatorApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        // Decrease copied timer
-        if self.copied_timer > 0.0 {
-            self.copied_timer -= ui.ctx().input(|i| i.stable_dt);
+        // Decrease feedback timer
+        if self.feedback_timer > 0.0 {
+            self.feedback_timer -= ui.ctx().input(|i| i.stable_dt);
+            if self.feedback_timer <= 0.0 {
+                self.feedback_msg = None;
+            }
             ui.ctx().request_repaint();
         }
 
@@ -317,10 +415,18 @@ impl eframe::App for CalculatorApp {
                     self.live_preview();
                 }
 
-                // Copy button
-                if brutalist_badge(ui, "COPY", false, &self.theme).clicked() {
-                    ui.ctx().copy_text(self.result.clone());
-                    self.copied_timer = 1.5;
+                // Copy / Paste dynamic toggle button
+                let (btn_label, is_active) = if self.has_copied {
+                    ("PASTE", true)
+                } else {
+                    ("COPY", false)
+                };
+                if brutalist_badge(ui, btn_label, is_active, &self.theme).clicked() {
+                    if self.has_copied {
+                        self.paste_clipboard();
+                    } else {
+                        self.copy_result(ui.ctx());
+                    }
                 }
             });
         });
@@ -335,7 +441,7 @@ impl eframe::App for CalculatorApp {
             error_msg: self.error_msg.as_deref(),
             angle_mode_label: self.eval_ctx.angle_mode.label(),
             memory_value: self.eval_ctx.memory,
-            copied_feedback: self.copied_timer > 0.0,
+            feedback: self.feedback_msg.as_deref(),
         };
         render_display(ui, &display_state, &self.theme);
 

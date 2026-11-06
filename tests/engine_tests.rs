@@ -107,6 +107,42 @@ fn test_scientific_advanced_formulas() {
 }
 
 #[test]
+fn test_paste_and_copy_state_transitions() {
+    use rustcalc::app::CalculatorApp;
+    use rustcalc::ui::keypad::KeyAction;
+
+    let mut app = CalculatorApp::default();
+    assert!(!app.has_copied);
+
+    // Paste initial formula
+    app.paste_text("sin(30) + cos(60)");
+    assert_eq!(app.expression, "sin(30) + cos(60)");
+    assert_eq!(app.result, "1");
+
+    // Simulate evaluate
+    app.execute_action(KeyAction::Evaluate);
+    assert!(app.just_evaluated);
+    assert_eq!(app.result, "1");
+
+    // Copy result manually by setting state
+    app.last_copied = app.result.clone();
+    app.has_copied = true;
+    assert!(app.has_copied);
+
+    // Pasting an operator after evaluation appends to previous ans
+    app.paste_text("+ 4");
+    assert_eq!(app.expression, "1 + 4");
+    assert_eq!(app.result, "5");
+
+    // Clear resets copied state
+    app.has_copied = true;
+    app.execute_action(KeyAction::Clear);
+    assert!(!app.has_copied);
+    assert_eq!(app.expression, "");
+    assert_eq!(app.result, "0");
+}
+
+#[test]
 fn test_high_volume_stress_calculation() {
     let ctx = EvalContext::default();
     for i in 1..=500 {

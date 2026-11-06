@@ -10,7 +10,7 @@ pub struct DisplayState<'a> {
     pub error_msg: Option<&'a str>,
     pub angle_mode_label: &'a str,
     pub memory_value: f64,
-    pub copied_feedback: bool,
+    pub feedback: Option<&'a str>,
 }
 
 pub fn render_display(
@@ -42,9 +42,9 @@ pub fn render_display(
         // Header status indicators
         content_ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if state.copied_feedback {
+                if let Some(fb) = state.feedback {
                     ui.label(
-                        egui::RichText::new("[COPIED TO CLIPBOARD]")
+                        egui::RichText::new(format!("[{}]", fb))
                             .font(FontId::monospace(9.5))
                             .strong()
                             .color(HERMES_ORANGE),

@@ -9,6 +9,7 @@ description = "RustCALC - Scientific Calculator in pure Rust with egui"
 eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "clipboard", "links"] }
 egui = { version = "0.37.0", default-features = false, features = ["default_fonts"] }
 mimalloc = "0.1.52"
+arboard = "3.7.0"
 
 [profile.release]
 opt-level = 3
